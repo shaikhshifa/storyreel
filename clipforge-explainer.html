@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Clipforge – script to animated clip</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef1f6;--panel:#fff;--ink:#1b2233;--mute:#5d667a;--line:#d9dee8;--ac:#5b3df5;--acink:#fff;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141c;--panel:#1b1f2b;--ink:#eef0f6;--mute:#9aa3b8;--line:#2c3244;--ac:#8b78ff;--acink:#12141c}}
+:root[data-theme="dark"]{--bg:#12141c;--panel:#1b1f2b;--ink:#eef0f6;--mute:#9aa3b8;--line:#2c3244;--ac:#8b78ff;--acink:#12141c}
+html,body{margin:0}
+*,*::before,*::after{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 'Bricolage Grotesque',system-ui,sans-serif}
+main{max-width:1080px;margin:0 auto;padding:20px 16px 40px;display:grid;gap:20px;grid-template-columns:minmax(0,1fr)}
+@media(min-width:860px){main{grid-template-columns:minmax(0,5fr) minmax(0,4fr)}}
+h1{font-size:26px;font-weight:800;margin:0 0 2px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+label{display:block;font-weight:500;margin:0 0 6px}
+textarea,input,select{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+textarea{min-height:130px;resize:vertical}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.row{display:flex;gap:10px;margin:12px 0}.row>div{flex:1;min-width:0}
+button{font:inherit;font-weight:500;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:9px 14px}
+button.p{background:var(--ac);color:var(--acink);border-color:var(--ac)}
+.stage{display:flex;justify-content:center;background:var(--bg);border-radius:10px;padding:10px}
+canvas{max-width:100%;max-height:62vh;border-radius:8px;background:#000}
+.ctl{display:flex;gap:10px;align-items:center;margin-top:12px}
+.ctl input{padding:0;flex:1}
+.time{color:var(--mute);font-variant-numeric:tabular-nums;min-width:82px;text-align:right}
+.sc{display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px;margin-top:8px}
+.note{color:var(--mute);font-size:13px;margin:12px 0 0}
+</style>
+</head>
+<body>
+<main>
+<section class="card">
+  <h1>Clipforge</h1>
+  <p class="sub">Paste a script. Get an animated explainer or social clip, scene by scene.</p>
+  <label for="script">Script</label>
+  <textarea id="script">Most people forget 70% of what they learn within a day.
+Spaced repetition fixes that by timing your reviews.
+Review at 1 day, 3 days, 7 days, 21 days
+Students using it score 2x higher on recall tests.
+Start your first deck today.</textarea>
+  <div class="row">
+    <div><label for="size">Format</label><select id="size"><option>9:16</option><option>1:1</option><option>16:9</option></select></div>
+    <div><label for="style">Style</label><select id="style"><option value="aurora">Aurora</option><option value="sunset">Sunset</option><option value="mint">Mint</option></select></div>
+  </div>
+  <button class="p" id="gen">Generate scenes</button>
+  <div id="scenes"></div>
+  <p class="note">The scene planner is rule-based for now: it splits your script, then picks a layout per line (title, statement, count-up stat, list, call to action). An LLM can replace it later.</p>
+</section>
+<section class="card">
+  <div class="stage"><canvas id="cv"></canvas></div>
+  <div class="ctl">
+    <button class="p" id="play">Play</button>
+    <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Timeline">
+    <span class="time" id="tm">0.0 / 0.0s</span>
+  </div>
+</section>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const PAL={aurora:{a:'#0f172a',b:'#3730a3',fg:'#ffffff',ac:'#a78bfa'},sunset:{a:'#4c0519',b:'#c2410c',fg:'#fff7ed',ac:'#fdba74'},mint:{a:'#ecfdf5',b:'#a7f3d0',fg:'#064e3b',ac:'#059669'}};
+const SZ={'9:16':[540,960],'1:1':[720,720],'16:9':[960,540]};
+const KINDS=['title','statement','stat','list','cta'];
+const FONT="'Bricolage Grotesque',system-ui,sans-serif";
+let scenes=[],t=0,playing=false,prev=0;
+const ease=p=>1-Math.pow(1-p,3),cl=p=>Math.max(0,Math.min(1,p));
+const dur=s=>Math.min(6,2.4+s.text.split(/\s+/).length*.22);
+const total=()=>scenes.reduce((n,s)=>n+s.d,0);
+
+function plan(text){
+  const parts=text.split(/(?<=[.!?])\s+|\n+/).map(s=>s.trim()).filter(Boolean).slice(0,6);
+  scenes=parts.map((tx,i)=>{
+    let k='statement';
+    if(i===0)k='title';
+    else if(i===parts.length-1&&parts.length>2)k='cta';
+    else if(/\d/.test(tx))k='stat';
+    else if(tx.split(/[:,;]/).length>=3)k='list';
+    return {text:tx,kind:k,d:0};
+  });
+  scenes.forEach(s=>s.d=dur(s));
+  drawList();t=0;sync();
+}
+function drawList(){
+  const box=$('#scenes');box.innerHTML='';
+  scenes.forEach((s,i)=>{
+    const r=document.createElement('div');r.className='sc';
+    const sel=document.createElement('select');sel.setAttribute('aria-label','Layout for scene '+(i+1));
+    KINDS.forEach(k=>{const o=document.createElement('option');o.textContent=k;if(k===s.kind)o.selected=true;sel.appendChild(o)});
+    sel.onchange=()=>{s.kind=sel.value;sync()};
+    const inp=document.createElement('input');inp.value=s.text;inp.setAttribute('aria-label','Text for scene '+(i+1));
+    inp.oninput=()=>{s.text=inp.value;s.d=dur(s);sync()};
+    r.append(sel,inp);box.appendChild(r);
+  });
+}
+function setSize(){const [w,h]=SZ[$('#size').value];const c=$('#cv');c.width=w;c.height=h;draw()}
+function at(x){let n=0;for(let i=0;i<scenes.length;i++){const s=scenes[i];if(x<n+s.d||i===scenes.length-1)return{s,i,lt:Math.min(x-n,s.d)};n+=s.d}return{}}
+function wrap(x,text,max){
+  const w=text.split(/\s+/),out=[];let ln='';
+  w.forEach(a=>{const tt=ln?ln+' '+a:a;if(x.measureText(tt).width>max&&ln){out.push(ln);ln=a}else ln=tt});
+  if(ln)out.push(ln);return out;
+}
+function block(x,lines,fs,X,Y,lt,fade,align,col){
+  x.textAlign=align;x.textBaseline='top';x.fillStyle=col;
+  const lh=fs*1.18,h=lines.length*lh;
+  lines.forEach((l,i)=>{
+    const p=ease(cl((lt-i*.14)/.55));
+    x.globalAlpha=p*fade;x.fillText(l,X,Y-h/2+i*lh+(1-p)*fs*.6);
+  });
+  x.globalAlpha=1;
+}
+function draw(){
+  const c=$('#cv'),x=c.getContext('2d'),W=c.width,H=c.height,pl=PAL[$('#style').value];
+  const g=x.createLinearGradient(0,0,W,H);g.addColorStop(0,pl.a);g.addColorStop(1,pl.b);
+  x.fillStyle=g;x.fillRect(0,0,W,H);
+  x.fillStyle=pl.ac;x.globalAlpha=.16;
+  for(let k=0;k<4;k++){x.beginPath();x.arc(W*(.5+.4*Math.sin(t*.4+k*1.7)),H*(.5+.4*Math.cos(t*.3+k*2.3)),W*(.16+.06*k),0,7);x.fill()}
+  x.globalAlpha=1;
+  const {s,lt}=at(t);
+  if(!s)return;
+  const fade=cl((s.d-lt)/.4),m=W*.1,mw=W-2*m;
+  x.fillStyle=pl.fg;
+  if(s.kind==='stat'){
+    const mt=s.text.match(/(\d[\d,]*\.?\d*)\s*(%|[kKmMbB]\b|x\b|\+)?/);
+    if(mt){
+      const n=parseFloat(mt[1].replace(/,/g,'')),v=n*ease(cl(lt/1.2));
+      const shown=(Number.isInteger(n)?Math.round(v):v.toFixed(1)).toLocaleString()+(mt[2]||'');
+      x.font=`800 ${W*.22}px ${FONT}`;x.textAlign='center';x.textBaseline='middle';
+      x.globalAlpha=ease(cl(lt/.4))*fade;x.fillStyle=pl.ac;x.fillText(shown,W/2,H*.36);x.globalAlpha=1;
+      const fs=W*.052;x.font=`500 ${fs}px ${FONT}`;
+      block(x,wrap(x,s.text,mw),fs,W/2,H*.62,Math.max(0,lt-.5),fade,'center',pl.fg);
+    }else s.kind='statement';
+  }
+  if(s.kind==='list'){
+    const ps=s.text.split(/[:,;]\s*/).filter(Boolean);
+    let head='';if(s.text.includes(':'))head=ps.shift();
+    const items=ps.flatMap(p=>p.split(/\s+and\s+/)).slice(0,5),fs=W*.06;
+    x.font=`800 ${fs*1.05}px ${FONT}`;x.textAlign='left';x.textBaseline='top';
+    let y=H*.5-(items.length+(head?1.4:0))*fs*.7;
+    if(head){x.globalAlpha=ease(cl(lt/.5))*fade;x.fillStyle=pl.ac;x.fillText(head,m,y);y+=fs*1.6;x.globalAlpha=1}
+    x.font=`500 ${fs}px ${FONT}`;
+    items.forEach((it,i)=>{
+      const p=ease(cl((lt-.4-i*.35)/.5));x.globalAlpha=p*fade;
+      x.fillStyle=pl.ac;x.beginPath();x.arc(m+fs*.25,y+fs*.5+(1-p)*20,fs*.22,0,7);x.fill();
+      x.fillStyle=pl.fg;x.fillText(it,m+fs*.9,y+(1-p)*20);y+=fs*1.4;
+    });
+    x.globalAlpha=1;
+  }
+  if(s.kind==='title'||s.kind==='statement'||s.kind==='cta'){
+    const big=s.kind==='title',cta=s.kind==='cta',fs=W*(big?.095:.07);
+    x.font=`800 ${fs}px ${FONT}`;
+    const lines=wrap(x,s.text,mw);
+    const al=cta?'center':'left',X=cta?W/2:m;
+    block(x,lines,fs,X,H*(cta?.42:.5),lt,fade,al,pl.fg);
+    if(!cta){const bw=Math.min(mw*.4,W*.25)*ease(cl(lt/.8));x.globalAlpha=fade;x.fillStyle=pl.ac;x.fillRect(m,H*.5-lines.length*fs*.59-fs*.5,bw,W*.012);x.globalAlpha=1}
+    else{
+      const pu=1+.04*Math.sin(t*5),bw=W*.5*pu,bh=W*.12*pu,p=ease(cl((lt-.7)/.4));
+      x.globalAlpha=p*fade;x.fillStyle=pl.ac;x.beginPath();x.roundRect(W/2-bw/2,H*.42+lines.length*fs*.62+fs*.4,bw,bh,bh/2);x.fill();
+      x.fillStyle=pl.a;x.font=`800 ${W*.045}px ${FONT}`;x.textAlign='center';x.textBaseline='middle';
+      x.fillText('Get started',W/2,H*.42+lines.length*fs*.62+fs*.4+bh/2);x.globalAlpha=1;
+    }
+  }
+  x.fillStyle=pl.ac;x.fillRect(0,H-W*.012,W*Math.min(1,t/total()),W*.012);
+}
+function sync(){
+  $('#seek').value=total()?t/total()*1000:0;
+  $('#tm').textContent=t.toFixed(1)+' / '+total().toFixed(1)+'s';
+  draw();
+}
+function loop(n){
+  if(!playing)return;
+  t+=(n-prev)/1000;prev=n;
+  if(t>=total()){t=total();playing=false;$('#play').textContent='Replay'}
+  sync();if(playing)requestAnimationFrame(loop);
+}
+$('#play').onclick=()=>{
+  if(playing){playing=false;$('#play').textContent='Play';return}
+  if(t>=total())t=0;
+  playing=true;$('#play').textContent='Pause';prev=performance.now();requestAnimationFrame(loop);
+};
+$('#seek').oninput=e=>{t=e.target.value/1000*total();sync()};
+$('#gen').onclick=()=>{plan($('#script').value);if(!playing)$('#play').click()};
+$('#size').onchange=setSize;$('#style').onchange=draw;
+setSize();plan($('#script').value);
+</script>
+</body>
+</html>

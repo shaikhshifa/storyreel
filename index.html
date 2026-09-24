@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Storyreel – AI story video maker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef1f6;--panel:#fff;--ink:#1b2233;--mute:#5d667a;--line:#d9dee8;--ac:#5b3df5;--acink:#fff;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141c;--panel:#1b1f2b;--ink:#eef0f6;--mute:#9aa3b8;--line:#2c3244;--ac:#8b78ff;--acink:#12141c}}
+:root[data-theme="dark"]{--bg:#12141c;--panel:#1b1f2b;--ink:#eef0f6;--mute:#9aa3b8;--line:#2c3244;--ac:#8b78ff;--acink:#12141c}
+html,body{margin:0}
+*,*::before,*::after{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 'Bricolage Grotesque',system-ui,sans-serif}
+main{max-width:1080px;margin:0 auto;padding:20px 16px 40px;display:grid;gap:20px;grid-template-columns:minmax(0,1fr)}
+@media(min-width:860px){main{grid-template-columns:minmax(0,4fr) minmax(0,5fr)}}
+h1{font-size:26px;font-weight:800;margin:0 0 2px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+label{display:block;font-weight:500;margin:0 0 6px}
+textarea,select{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+textarea{min-height:110px;resize:vertical}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.row{display:flex;gap:10px;margin:12px 0}.row>div{flex:1;min-width:0}
+button{font:inherit;font-weight:500;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:9px 14px}
+button.p{background:var(--ac);color:var(--acink);border-color:var(--ac)}
+button:disabled{opacity:.6;cursor:wait}
+.stage{display:flex;justify-content:center;background:var(--bg);border-radius:10px;padding:10px}
+canvas{max-width:100%;max-height:64vh;border-radius:8px;background:#000}
+.ctl{display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.ctl label{margin:0;display:flex;gap:6px;align-items:center;font-weight:400;color:var(--mute)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.chips button{padding:5px 11px}.chips button[aria-current="true"]{background:var(--ac);color:var(--acink);border-color:var(--ac)}
+#msg{min-height:22px;margin:12px 0 0;color:var(--mute)}
+.note{color:var(--mute);font-size:13px;margin:8px 0 0}
+</style>
+</head>
+<body>
+<main>
+<section class="card">
+  <h1>Storyreel</h1>
+  <p class="sub">Describe a story. AI writes it scene by scene, then plays it as a narrated animated video.</p>
+  <label for="idea">Story idea</label>
+  <textarea id="idea">A tiny robot who is afraid of the dark finds a lighthouse on a forgotten island.</textarea>
+  <div class="row">
+    <div><label for="genre">Genre</label><select id="genre"><option>Fantasy</option><option>Sci-fi</option><option>Bedtime</option><option>Adventure</option><option>Mystery</option></select></div>
+    <div><label for="size">Format</label><select id="size"><option>9:16</option><option>1:1</option><option>16:9</option></select></div>
+  </div>
+  <button class="p" id="gen">Make my video</button>
+  <p id="msg" role="status">Showing a demo story. Write your own above.</p>
+  <p class="note">Scenes are drawn from the story's setting, time of day, mood colors and cast, so every story gets its own look.</p>
+</section>
+<section class="card">
+  <div class="stage"><canvas id="cv"></canvas></div>
+  <div class="ctl">
+    <button class="p" id="play">Play</button>
+    <label><input type="checkbox" id="voice" checked> Voice narration</label>
+  </div>
+  <div class="chips" id="chips"></div>
+</section>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const cl=p=>Math.max(0,Math.min(1,p)),ease=p=>1-Math.pow(1-p,3);
+const SZ={'9:16':[540,960],'1:1':[720,720],'16:9':[960,540]};
+const SET=['forest','city','ocean','space','desert','mountains','hills'],TIME=['day','dusk','night'],CAM=['in','out','left','right'];
+const HEX=/^#[0-9a-f]{6}$/i;
+const FONT="'Bricolage Grotesque',system-ui,sans-serif",EMO="'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif";
+const DEMO={title:'The Lantern Fox',scenes:[
+{narration:'Deep in Moonwood, a small fox named Ember found a lantern that glowed without fire.',setting:'forest',time:'dusk',colors:['#ff9a5a','#3b1f5c'],cast:['🦊'],camera:'in'},
+{narration:'An old owl whispered that the lantern could light the way home for anyone who was lost.',setting:'forest',time:'night',colors:['#0b1030','#1d2b64'],cast:['🦊','🦉'],camera:'left'},
+{narration:'So Ember climbed the cold mountains, past sleeping giants of stone and snow.',setting:'mountains',time:'dusk',colors:['#f6a56b','#4a2c6d'],cast:['🦊'],camera:'right'},
+{narration:'At the shore, a lonely sailor drifted in the fog, unable to see the stars.',setting:'ocean',time:'night',colors:['#0a1a3c','#124e78'],cast:['🦊','⛵'],camera:'out'},
+{narration:'Ember raised the lantern high, and the sailor found the harbor. Home had never been so bright.',setting:'hills',time:'day',colors:['#8fd3ff','#ffe9a8'],cast:['🦊','🌟'],camera:'in'}]};
+let story=DEMO,cur=0,lt=0,playing=false,spoken=true,prev=0,tok=0,done=false;
+const minD=s=>Math.max(4,s.narration.split(/\s+/).length*.4+1.2);
+const rnd=a=>()=>(a=a*16807%2147483647)/2147483647;
+function shade(h,f){const r=[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)*f|0);return `rgb(${r})`}
+function wrap(x,text,max){const out=[];let l='';text.split(/\s+/).forEach(w=>{const t=l?l+' '+w:w;if(x.measureText(t).width>max&&l){out.push(l);l=w}else l=t});if(l)out.push(l);return out}
+function ridge(x,W,H,y0,amp,fq,ph,col){x.fillStyle=col;x.beginPath();x.moveTo(-W*.3,H*1.2);for(let i=-W*.3;i<=W*1.3;i+=W/40)x.lineTo(i,y0+Math.sin(i*fq+ph)*amp+Math.sin(i*fq*2.3+ph*1.7)*amp*.4);x.lineTo(W*1.3,H*1.2);x.fill()}
+
+function draw(){
+  const c=$('#cv'),x=c.getContext('2d'),W=c.width,H=c.height,s=story.scenes[cur];
+  if(!s)return;
+  const d=minD(s),p=cl(lt/d),[c1,c2]=s.colors,st=s.setting,R=rnd(cur*97+13);
+  const night=s.time==='night'||st==='space',float=st==='ocean'||st==='space',gy=float?H*.6:H*.74;
+  const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,c1);g.addColorStop(1,c2);x.fillStyle=g;x.fillRect(0,0,W,H);
+  const sc=s.camera==='in'?1.05+.1*p:s.camera==='out'?1.15-.1*p:1.1;
+  const pan=s.camera==='left'?W*.05*(1-2*p):s.camera==='right'?-W*.05*(1-2*p):0;
+  const layer=(par,fn)=>{x.save();x.translate(W/2+pan*par,H/2);x.scale(sc,sc);x.translate(-W/2,-H/2);fn();x.restore()};
+  layer(.2,()=>{
+    if(night){for(let i=0;i<70;i++){x.globalAlpha=.3+.6*(.5+.5*Math.sin(lt*3+i));x.fillStyle='#fff';x.fillRect(R()*W,R()*H*.6,2,2)}x.globalAlpha=1}
+    if(st==='space'){x.fillStyle='#b98cff';x.beginPath();x.arc(W*.72,H*.3,W*.12,0,7);x.fill();x.strokeStyle='rgba(255,255,255,.5)';x.lineWidth=4;x.beginPath();x.ellipse(W*.72,H*.3,W*.2,W*.05,-.4,0,7);x.stroke()}
+    else{x.fillStyle=s.time==='night'?'#f3f0e0':s.time==='dusk'?'#ffb457':'#fff3a0';x.beginPath();x.arc(W*.74,s.time==='night'?H*.2:s.time==='dusk'?H*.46:H*.18,W*.07,0,7);x.fill()}
+  });
+  layer(.5,()=>{
+    if(st==='ocean'){
+      const hz=H*.55;x.fillStyle=shade(c2,.7);x.fillRect(-W,hz,W*3,H);
+      for(let k=0;k<4;k++){x.strokeStyle='rgba(255,255,255,.2)';x.lineWidth=2;x.beginPath();
+        for(let i=-W*.2;i<=W*1.2;i+=8){const y=hz+(k+1)*H*.055+Math.sin(i*.02+lt*(1+k*.4)+k)*6;i<=-W*.2?x.moveTo(i,y):x.lineTo(i,y)}x.stroke()}
+    }else if(st!=='space'){
+      const big=st==='mountains',a=big?H*.13:H*.05,fq=big?.008:.006,ys=big?[.42,.52,.62]:[.5,.6,.68];
+      ys.forEach((y,i)=>ridge(x,W,H,H*y,a*(1+i*.3),fq,cur*2+i*1.9,shade(c2,.6-i*.14)));
+      if(st==='city')for(let i=0;i<15;i++){const bw=W*.08,bh=H*(.1+R()*.28),bx=i*W*.075-W*.05;
+        x.fillStyle=shade(c2,.22);x.fillRect(bx,gy-bh,bw,bh+H*.1);
+        if(s.time!=='day'){x.fillStyle='#ffd870';for(let j=0;j<bh/26;j++)if(R()>.4)x.fillRect(bx+bw*.2+(j%2)*bw*.35,gy-bh+8+j*22,5,8)}}
+      if(st==='forest')for(let i=0;i<16;i++){const tx=R()*W*1.1-W*.05,th=H*(.14+R()*.14);x.fillStyle=shade(c2,.16+.12*R());
+        for(let k=0;k<3;k++){x.beginPath();x.moveTo(tx,gy-th+k*th*.24);x.lineTo(tx+th*.28+k*th*.06,gy-th*.4+k*th*.24);x.lineTo(tx-th*.28-k*th*.06,gy-th*.4+k*th*.24);x.fill()}
+        x.fillRect(tx-4,gy-th*.3,8,th*.35)}
+    }
+  });
+  const n=s.cast.length,fs=W*(n===1?.22:n===2?.18:.15),xs=n===1?[.5]:n===2?[.36,.64]:[.24,.5,.76];
+  layer(.8,()=>s.cast.forEach((e,i)=>{
+    const a=ease(cl((lt-.3-i*.25)/.8)),bob=Math.sin(lt*2.2+i*1.3)*fs*.04;
+    const cx=W*xs[i]+(1-a)*(i%2?1:-1)*W*.25,cy=gy-fs*.45+bob-(float?fs*.15:0);
+    x.globalAlpha=a;
+    if(!float){x.fillStyle='rgba(0,0,0,.3)';x.beginPath();x.ellipse(cx,gy+fs*.02,fs*.35,fs*.07,0,0,7);x.fill()}
+    x.font=`${fs}px ${EMO}`;x.textAlign='center';x.textBaseline='middle';x.fillStyle='#000';x.fillText(e,cx,cy);x.globalAlpha=1;
+  }));
+  if(!float)layer(1.3,()=>ridge(x,W,H,gy+H*.06,H*.015,.01,cur,shade(c2,.18)));
+  const v=x.createRadialGradient(W/2,H/2,W*.3,W/2,H/2,H*.75);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(0,0,0,.45)');x.fillStyle=v;x.fillRect(0,0,W,H);
+  // title card
+  if(cur===0&&lt<2.6){const a=cl(Math.min(lt/.5,(2.6-lt)/.5));x.fillStyle=`rgba(0,0,0,${.4*a})`;x.fillRect(0,0,W,H);
+    const f=W*.09;x.font=`800 ${f}px ${FONT}`;x.textAlign='center';x.textBaseline='top';x.fillStyle='#fff';x.globalAlpha=a;
+    const L=wrap(x,story.title,W*.8);L.forEach((l,i)=>x.fillText(l,W/2,H*.4-L.length*f*.6+i*f*1.2));x.globalAlpha=1}
+  // captions
+  const fc=W*.045;x.font=`500 ${fc}px ${FONT}`;const words=s.narration.split(/\s+/),lines=wrap(x,s.narration,W*.84);
+  const shown=Math.ceil(cl(lt/(d*.85))*words.length);let cnt=0;
+  const bh=lines.length*fc*1.35+fc,by=H*.93-bh;
+  x.fillStyle='rgba(0,0,0,.55)';x.beginPath();x.roundRect(W*.06,by,W*.88,bh,fc*.6);x.fill();
+  x.textAlign='left';x.textBaseline='top';x.fillStyle='#fff';
+  lines.forEach((l,i)=>{const w=l.split(' ');const lx=(W-x.measureText(l).width)/2;
+    const vis=w.slice(0,Math.max(0,shown-cnt)).join(' ');cnt+=w.length;x.fillText(vis,lx,by+fc*.5+i*fc*1.35)});
+  // fade in from black + progress
+  const fa=1-cl(lt/.6);if(fa>0){x.fillStyle=`rgba(0,0,0,${fa})`;x.fillRect(0,0,W,H)}
+  const all=story.scenes.reduce((a,q)=>a+minD(q),0),dn=story.scenes.slice(0,cur).reduce((a,q)=>a+minD(q),0);
+  x.fillStyle='#fff';x.globalAlpha=.8;x.fillRect(0,0,W*cl((dn+Math.min(lt,d))/all),W*.01);x.globalAlpha=1;
+}
+function say(){
+  tok++;const my=tok,ok=$('#voice').checked&&'speechSynthesis' in window;
+  if('speechSynthesis' in window)speechSynthesis.cancel();
+  if(!ok){spoken=true;return}
+  spoken=false;const u=new SpeechSynthesisUtterance(story.scenes[cur].narration);u.rate=.95;
+  u.onend=u.onerror=()=>{if(my===tok)spoken=true};speechSynthesis.speak(u);
+}
+function chips(){
+  const b=$('#chips');b.innerHTML='';
+  story.scenes.forEach((s,i)=>{const e=document.createElement('button');e.textContent='Scene '+(i+1);
+    if(i===cur)e.setAttribute('aria-current','true');e.onclick=()=>go(i);b.appendChild(e)});
+}
+function go(i){cur=i;lt=0;done=false;if(playing)say();else if('speechSynthesis' in window)speechSynthesis.cancel();chips();draw()}
+function loop(n){
+  if(!playing)return;
+  lt+=Math.min(.1,(n-prev)/1000);prev=n;
+  const d=minD(story.scenes[cur]);
+  if(lt>=d&&(spoken||lt>d*1.8+3)){
+    if(cur<story.scenes.length-1){go(cur+1)}else{playing=false;done=true;tok++;$('#play').textContent='Replay'}
+  }
+  draw();if(playing)requestAnimationFrame(loop);
+}
+$('#play').onclick=()=>{
+  if(playing){playing=false;tok++;if('speechSynthesis' in window)speechSynthesis.cancel();$('#play').textContent='Play';return}
+  if(done){done=false;cur=0;lt=0;chips()}
+  playing=true;$('#play').textContent='Pause';say();prev=performance.now();requestAnimationFrame(loop);
+};
+$('#voice').onchange=()=>{if(playing)say()};
+$('#size').onchange=()=>{const [w,h]=SZ[$('#size').value],c=$('#cv');c.width=w;c.height=h;draw()};
+function clean(r){
+  const sc=((r&&r.scenes)||[]).slice(0,8).map(s=>({
+    narration:String(s.narration||'').slice(0,260),
+    setting:SET.includes(s.setting)?s.setting:'hills',
+    time:TIME.includes(s.time)?s.time:'day',
+    colors:Array.isArray(s.colors)&&s.colors.length>1&&s.colors.slice(0,2).every(k=>HEX.test(k))?s.colors.slice(0,2):['#8fd3ff','#ffe9a8'],
+    cast:(Array.isArray(s.cast)&&s.cast.length?s.cast:['✨']).map(String).slice(0,3),
+    camera:CAM.includes(s.camera)?s.camera:'in'})).filter(s=>s.narration);
+  if(!sc.length)throw new Error('empty');
+  return {title:String((r&&r.title)||'Untitled story').slice(0,60),scenes:sc};
+}
+$('#gen').onclick=async()=>{
+  const idea=$('#idea').value.trim(),msg=$('#msg'),btn=$('#gen');
+  if(!idea){msg.textContent='Add a story idea first.';return}
+  const sample=window.claude&&await claude.use('sample');
+  if(!sample){msg.textContent="AI writing isn't available in this view, so the demo story is still loaded.";return}
+  btn.disabled=true;msg.textContent='Writing your story…';
+  const prompt=`Write a short ${$('#genre').value} story in 6 scenes for a narrated animated video, based on this idea: "${idea}". Return ONLY JSON: {"title": string, "scenes": [{"narration": 1-2 sentences, under 30 words, "setting": one of forest|city|ocean|space|desert|mountains|hills, "time": one of day|dusk|night, "colors": [sky top hex, horizon hex] such as ["#1a2a6c","#fdbb2d"], "cast": 1-3 emoji for who is on screen, "camera": one of in|out|left|right}]}. Match colors to the mood. Give the story a clear beginning, middle and end.`;
+  try{
+    story=clean(await sample.json(prompt,{cache:false}));
+    playing=false;tok++;done=false;cur=0;lt=0;chips();draw();
+    msg.textContent='Ready: "'+story.title+'"';
+    $('#play').textContent='Pause';playing=true;say();prev=performance.now();requestAnimationFrame(loop);
+  }catch(e){msg.textContent=e&&e.code==='not_granted'?'Permission was declined, so no story was written.':'Could not write the story. Try again.'}
+  btn.disabled=false;
+};
+$('#size').onchange();chips();draw();
+</script>
+</body>
+</html>
