@@ -1,0 +1,7 @@
+{
+  "name": "storyreel",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  }
+}

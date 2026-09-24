@@ -178,19 +178,40 @@ function clean(r){
   if(!sc.length)throw new Error('empty');
   return {title:String((r&&r.title)||'Untitled story').slice(0,60),scenes:sc};
 }
+function localStory(idea,genre){
+  const subject=idea.replace(/[.!?]+$/,'').trim();
+  return clean({title:genre+' story: '+subject,scenes:[
+    {narration:'Once upon a time, '+subject+'.',setting:'hills',time:'day',colors:['#8fd3ff','#ffe9a8'],cast:['✨'],camera:'in'},
+    {narration:'At first, the path ahead seemed uncertain, but a small sign of hope appeared.',setting:'forest',time:'dusk',colors:['#ff9a5a','#3b1f5c'],cast:['🌟'],camera:'left'},
+    {narration:'The journey grew harder, and courage mattered more than having all the answers.',setting:'mountains',time:'night',colors:['#0b1030','#1d2b64'],cast:['🦊','🌟'],camera:'right'},
+    {narration:'With a little help, the challenge became a chance to discover something unexpected.',setting:'ocean',time:'dusk',colors:['#f6a56b','#4a2c6d'],cast:['🦊','⛵'],camera:'out'},
+    {narration:'By the end, '+subject+' had become the beginning of a brighter adventure.',setting:'hills',time:'day',colors:['#8fd3ff','#ffe9a8'],cast:['✨','🌟'],camera:'in'}
+  ]});
+}
+async function writeStory(idea,genre){
+  const sample=window.claude&&await claude.use('sample');
+  if(sample){
+    const prompt=`Write a short ${genre} story in 6 scenes for a narrated animated video, based on this idea: "${idea}". Return ONLY JSON: {"title": string, "scenes": [{"narration": 1-2 sentences, under 30 words, "setting": one of forest|city|ocean|space|desert|mountains|hills, "time": one of day|dusk|night, "colors": [sky top hex, horizon hex] such as ["#1a2a6c","#fdbb2d"], "cast": 1-3 emoji for who is on screen, "camera": one of in|out|left|right}]}. Match colors to the mood. Give the story a clear beginning, middle and end.`;
+    return clean(await sample.json(prompt,{cache:false}));
+  }
+  const response=await fetch('/api/story',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idea,genre})});
+  if(!response.ok)throw new Error('story_request_failed');
+  return clean(await response.json());
+}
 $('#gen').onclick=async()=>{
   const idea=$('#idea').value.trim(),msg=$('#msg'),btn=$('#gen');
   if(!idea){msg.textContent='Add a story idea first.';return}
-  const sample=window.claude&&await claude.use('sample');
-  if(!sample){msg.textContent="AI writing isn't available in this view, so the demo story is still loaded.";return}
   btn.disabled=true;msg.textContent='Writing your story…';
-  const prompt=`Write a short ${$('#genre').value} story in 6 scenes for a narrated animated video, based on this idea: "${idea}". Return ONLY JSON: {"title": string, "scenes": [{"narration": 1-2 sentences, under 30 words, "setting": one of forest|city|ocean|space|desert|mountains|hills, "time": one of day|dusk|night, "colors": [sky top hex, horizon hex] such as ["#1a2a6c","#fdbb2d"], "cast": 1-3 emoji for who is on screen, "camera": one of in|out|left|right}]}. Match colors to the mood. Give the story a clear beginning, middle and end.`;
   try{
-    story=clean(await sample.json(prompt,{cache:false}));
+    story=await writeStory(idea,$('#genre').value);
     playing=false;tok++;done=false;cur=0;lt=0;chips();draw();
     msg.textContent='Ready: "'+story.title+'"';
     $('#play').textContent='Pause';playing=true;say();prev=performance.now();requestAnimationFrame(loop);
-  }catch(e){msg.textContent=e&&e.code==='not_granted'?'Permission was declined, so no story was written.':'Could not write the story. Try again.'}
+  }catch(e){
+    story=localStory(idea,$('#genre').value);playing=false;tok++;done=false;cur=0;lt=0;chips();draw();
+    msg.textContent='AI writing is unavailable, so a local story was created from your idea.';
+    $('#play').textContent='Play';
+  }
   btn.disabled=false;
 };
 $('#size').onchange();chips();draw();
